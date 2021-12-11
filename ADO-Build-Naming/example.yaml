@@ -1,0 +1,53 @@
+---
+name: $(BuildName)
+
+trigger:
+  branches:
+    include:
+    - master
+
+parameters:
+  - name: Action
+    displayName: Action
+    type: string
+    default: 'Plan'
+    values:
+    - Plan
+    - Apply
+
+  - name: env
+    displayName: Environment
+    type: string
+    default: 'All'
+    values:
+    - All
+    - Sandbox
+    - Non-prod
+    - Prod
+
+stages:
+  - stage: init
+    displayName: Initialisation
+    jobs:
+      - job: init
+        steps:
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: |
+                $reason = @('BatchedCI', 'IndividualCI', 'Schedule')
+                if ($reason -contains $env:BUILD_REASON -Or '${{ parameters.Action }}' -eq "Apply")
+                {
+                  $tfAction = "Apply"
+                }
+                else
+                {
+                  $tfAction = "Plan"
+                }
+                echo $env:BUILD_REASON
+                echo $tfAction
+                echo '${{ parameters.env }}'
+                $environment = (echo '${{ parameters.env }}')
+                $BuildName = ($tfAction + " - " + $environment)
+                Write-Host "##vso[build.updatebuildnumber]$BuildName"
+        displayName: Update Build Name
