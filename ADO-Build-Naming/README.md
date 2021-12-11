@@ -8,4 +8,4 @@ Here's an example configuration you can incorporate in your pipeline
 
 <em>Note - Some code is omitted</em>
 
-Post - 
+Post - https://aqibrahman.com/dynamically-rename-your-azure-devops-pipeline-builds
