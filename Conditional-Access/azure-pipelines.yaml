@@ -1,0 +1,101 @@
+name: Conditional_access - ${{ parameters.Action }}
+
+trigger: none
+
+pr: none
+
+pool:
+  vmImage: 'windows-2019'
+
+parameters:
+  - name: Action
+    displayName: Action
+    type: string
+    default: 'Plan'
+    values:
+    - Plan
+    - Apply
+
+variables:
+  isMain: $[in(variables['Build.SourceBranch'], 'refs/heads/main')]
+
+stages:
+  - stage: Validate
+    jobs:
+    - job: validate
+      continueOnError: false
+      steps:
+      - task: Npm@1
+        displayName: 'Install jsonlint'
+        inputs:
+          command: 'custom'
+          customCommand: 'install jsonlint -g'
+      - task: PowerShell@2
+        displayName: 'Perform JSON syntax validation'
+        inputs:
+          targetType: 'inline'
+          script: |
+            Get-ChildItem -Path "$(Build.SourcesDirectory)" -Recurse -Include "*.json" |
+              ForEach-Object {
+                $jsonFile = $_.FullName
+                Write-Host "[INFO] Validating [$jsonFile]"
+                jsonlint $_
+            }
+          failOnStderr: true
+      - task: PowerShell@2
+        displayName: 'validate policies'
+        inputs:
+          filePath: '$(Build.SourcesDirectory)/scripts/validate-policies.ps1'
+
+  - stage: Plan
+    dependsOn: [Validate]
+    condition: succeeded('Validate')
+    jobs:
+    - job: compare_local_remote
+      steps:
+      - task: PowerShell@2
+        displayName: 'plan policies'
+        inputs:
+          filePath: '$(Build.SourcesDirectory)/scripts/compare-conditional-access-policies.ps1'
+          arguments: '-clientID $(clientID) -clientSecret $(clientSecret) -tenantID $(tenantID)'
+      - task: PublishPipelineArtifact@1
+        inputs:
+          targetPath: '$(Build.SourcesDirectory)\update'
+          artifact: 'update'
+          publishLocation: 'pipeline'
+      - task: PublishPipelineArtifact@1
+        inputs:
+          targetPath: '$(Build.SourcesDirectory)\new'
+          artifact: 'new'
+          publishLocation: 'pipeline'
+      - task: PublishPipelineArtifact@1
+        inputs:
+          targetPath: '$(Build.SourcesDirectory)\remove'
+          artifact: 'remove'
+          publishLocation: 'pipeline'
+
+  - stage: Apply
+    dependsOn: [Plan]
+    condition: |
+      and(
+      succeeded('Plan'),
+      eq(variables['isMain'], true),
+      eq('${{ parameters.Action }}', 'Apply')
+      )
+    jobs:
+    - deployment: apply
+      environment: 'Production'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - task: DownloadPipelineArtifact@2
+              inputs:
+                source: current
+                path: '$(Build.SourcesDirectory)'
+            - task: PowerShell@2
+              displayName: 'apply policies'
+              inputs:
+                filePath: '$(Build.SourcesDirectory)/scripts/apply-conditional-access-policies.ps1'
+                arguments: '-clientID $(clientID) -clientSecret $(clientSecret) -tenantID $(tenantID)'
